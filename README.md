@@ -18,6 +18,12 @@ A public instance is available and you are welcome to use it:
 https://convert.108848.xyz:8443/?url=<url-encoded-subscription-url>
 ```
 
+You can also open the web page and paste your subscription URL:
+
+```text
+https://convert.108848.xyz:8443/
+```
+
 Example:
 
 ```text
@@ -37,7 +43,7 @@ This project is designed for public deployment with SSRF protections:
 - Applies the same public-IP checks before TCP/QUIC certificate probing.
 - Limits response size, redirect count, line count, certificate targets, request rate, and concurrency.
 
-This public version does not write request logs.
+This public version does not write request logs and the web page does not use browser local storage.
 
 ## Install
 

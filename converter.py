@@ -40,6 +40,245 @@ BLOCKED_CERT_PORTS = {
 RATE_LIMIT = {}
 RATE_LOCK = threading.Lock()
 ACTIVE_REQUESTS = threading.BoundedSemaphore(MAX_ACTIVE_REQUESTS)
+INDEX_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Subscription Cert Converter</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7f4;
+      --text: #17201a;
+      --muted: #58645d;
+      --line: #cfd8d0;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --danger: #8a341f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    main {
+      width: min(880px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0 48px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 28px;
+      box-shadow: 0 16px 40px rgba(23, 32, 26, 0.08);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.15;
+      font-weight: 700;
+    }
+    p {
+      margin: 0;
+      color: var(--muted);
+    }
+    form {
+      margin-top: 28px;
+      display: grid;
+      gap: 12px;
+    }
+    label {
+      font-weight: 650;
+    }
+    textarea,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      background: #fff;
+      font: inherit;
+      outline: none;
+    }
+    textarea {
+      min-height: 112px;
+      resize: vertical;
+      padding: 12px;
+      overflow-wrap: anywhere;
+    }
+    input {
+      padding: 11px 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    textarea:focus,
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    button,
+    a.button {
+      min-height: 42px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 9px 14px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 650;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    button.secondary,
+    a.button.secondary {
+      background: #fff;
+      color: var(--accent-strong);
+      border-color: var(--line);
+    }
+    button:hover,
+    a.button:hover {
+      background: var(--accent-strong);
+      color: #fff;
+    }
+    button.secondary:hover,
+    a.button.secondary:hover {
+      border-color: var(--accent);
+    }
+    #result {
+      display: none;
+      margin-top: 24px;
+      gap: 12px;
+    }
+    .notice {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .notice a {
+      color: var(--accent-strong);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    .error {
+      display: none;
+      color: var(--danger);
+      font-weight: 650;
+    }
+    @media (max-width: 640px) {
+      main { width: min(100% - 20px, 880px); padding: 24px 0; }
+      .panel { padding: 20px; }
+      h1 { font-size: 24px; }
+      button,
+      a.button { width: 100%; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="panel" aria-labelledby="title">
+      <h1 id="title">Subscription Cert Converter</h1>
+      <p>生成带证书指纹的订阅转换地址，适用于需要关闭 insecure / allowInsecure 的客户端。</p>
+
+      <form id="converter-form" method="get" action="/">
+        <label for="source-url">订阅地址</label>
+        <textarea id="source-url" name="url" autocomplete="off" spellcheck="false" placeholder="https://example.com/api/v1/client/subscribe?token=..."></textarea>
+        <p id="error" class="error">请输入 http 或 https 开头的订阅地址。</p>
+        <div class="actions">
+          <button type="submit">生成转换地址</button>
+          <button class="secondary" type="button" id="clear">清空</button>
+        </div>
+      </form>
+
+      <div id="result">
+        <label for="converted-url">转换地址</label>
+        <input id="converted-url" type="text" readonly>
+        <div class="actions">
+          <button type="button" id="copy">复制地址</button>
+          <a class="button secondary" id="open" href="#" target="_blank" rel="noopener">打开转换结果</a>
+        </div>
+      </div>
+
+      <div class="notice">
+        <p>开源项目：<a href="https://github.com/iloveandyegg/subscription-cert-converter" target="_blank" rel="noopener">github.com/iloveandyegg/subscription-cert-converter</a></p>
+        <p>本页面不使用浏览器本地存储；服务不会保存订阅内容、token、节点密码或生成后的转换地址。</p>
+      </div>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById("converter-form");
+    const source = document.getElementById("source-url");
+    const result = document.getElementById("result");
+    const output = document.getElementById("converted-url");
+    const error = document.getElementById("error");
+    const openLink = document.getElementById("open");
+    const copyButton = document.getElementById("copy");
+    const clearButton = document.getElementById("clear");
+
+    function buildConverterUrl(value) {
+      const target = new URL("/", window.location.origin);
+      target.searchParams.set("url", value.trim());
+      return target.toString();
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = source.value.trim();
+      if (!/^https?:\\/\\//i.test(value)) {
+        error.style.display = "block";
+        result.style.display = "none";
+        return;
+      }
+      error.style.display = "none";
+      const converted = buildConverterUrl(value);
+      output.value = converted;
+      openLink.href = converted;
+      result.style.display = "grid";
+      output.focus();
+      output.select();
+    });
+
+    copyButton.addEventListener("click", async () => {
+      if (!output.value) return;
+      try {
+        await navigator.clipboard.writeText(output.value);
+        copyButton.textContent = "已复制";
+        setTimeout(() => { copyButton.textContent = "复制地址"; }, 1200);
+      } catch (_error) {
+        output.focus();
+        output.select();
+      }
+    });
+
+    clearButton.addEventListener("click", () => {
+      source.value = "";
+      output.value = "";
+      openLink.href = "#";
+      error.style.display = "none";
+      result.style.display = "none";
+      source.focus();
+    });
+  </script>
+</body>
+</html>
+"""
 
 
 class SecurityError(Exception):
@@ -478,12 +717,29 @@ def convert_subscription(text):
 
 class Handler(BaseHTTPRequestHandler):
     def send_text(self, status, text, content_type="text/plain; charset=utf-8"):
+        body = text.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(text.encode("utf-8"))
+        self.wfile.write(body)
+
+    def send_html(self, status, text):
+        body = text.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+        )
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         client_ip = self.client_address[0]
@@ -499,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
             qs = parse_url_qs(parsed.query)
             sub_url = qs.get("url", [None])[0]
             if not sub_url:
-                self.send_text(200, "Usage: /?url=<subscription_url>")
+                self.send_html(200, INDEX_HTML)
                 return
 
             text = fetch_subscription(sub_url)
@@ -511,6 +767,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Profile-Update-Interval", "24")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(output)))
             self.end_headers()
             self.wfile.write(output.encode())
         except SecurityError as e:
