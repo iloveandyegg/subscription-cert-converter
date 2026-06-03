@@ -10,6 +10,22 @@ Supported link types:
 
 The service fetches a subscription from `/?url=<subscription_url>`, converts supported node links, and returns a base64 encoded subscription.
 
+## Public Instance
+
+A public instance is available and you are welcome to use it:
+
+```text
+https://convert.108848.xyz:8443/?url=<url-encoded-subscription-url>
+```
+
+Example:
+
+```text
+https://convert.108848.xyz:8443/?url=https%3A%2F%2Fexample.com%2Fsubscribe%3Ftoken%3D...
+```
+
+Please URL-encode the subscription URL before placing it in the `url` query parameter. Do not share subscription URLs or tokens publicly.
+
 ## Security
 
 This project is designed for public deployment with SSRF protections:
