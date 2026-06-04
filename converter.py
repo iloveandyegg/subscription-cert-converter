@@ -289,6 +289,21 @@ class FetchError(Exception):
     pass
 
 
+class TLSHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128
+    daemon_threads = True
+
+    def __init__(self, server_address, handler_class, ssl_context):
+        self.ssl_context = ssl_context
+        super().__init__(server_address, handler_class)
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        sock.settimeout(10)
+        tls_sock = self.ssl_context.wrap_socket(sock, server_side=True, do_handshake_on_connect=False)
+        return tls_sock, addr
+
+
 def is_public_ip(ip):
     try:
         return ipaddress.ip_address(ip).is_global
@@ -786,10 +801,9 @@ def main():
     key = os.environ.get("CONVERTER_KEY", "privkey.pem")
     host = os.environ.get("CONVERTER_HOST", "0.0.0.0")
     port = int(os.environ.get("CONVERTER_PORT", "8443"))
-    server = ThreadingHTTPServer((host, port), Handler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(cert, key)
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    server = TLSHTTPServer((host, port), Handler, ctx)
     print(f"Listening on https://{host}:{port}")
     server.serve_forever()
 
