@@ -10,6 +10,18 @@ Supported link types:
 
 The service fetches a subscription from `/?url=<subscription_url>`, converts supported node links, and returns a base64 encoded subscription.
 
+## Why This Exists
+
+v2rayN discussion [#9460](https://github.com/2dust/v2rayN/discussions/9460) explains that recent Xray-core versions removed the `allowInsecure` TLS option and migrated the safe replacement to certificate pinning with `pinnedPeerCertSha256`. Subscriptions that still contain `insecure` or `allowInsecure` can make newer clients fail to start or import unusable nodes.
+
+This converter is a small helper for that transition: it fetches a subscription, probes each supported node certificate, removes the insecure flags, and writes the certificate pin back into the share link format expected by clients.
+
+## 中文说明
+
+v2rayN 的相关讨论 [#9460](https://github.com/2dust/v2rayN/discussions/9460) 说明：新版 Xray-core 已移除 TLS 里的 `allowInsecure` 选项，长期替代方案是使用证书固定，也就是 `pinnedPeerCertSha256`。如果订阅里的节点仍然带有 `insecure` 或 `allowInsecure`，新版客户端可能会启动失败，或者导入后节点不可用。
+
+这个转换器用于处理这类订阅：它会拉取订阅内容，探测支持节点的证书指纹，移除不安全参数，并把证书指纹写回客户端可识别的分享链接参数中。
+
 ## Public Instance
 
 A public instance is available and you are welcome to use it:
