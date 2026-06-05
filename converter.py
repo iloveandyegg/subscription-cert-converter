@@ -30,7 +30,12 @@ MAX_REDIRECTS = 3
 MAX_ACTIVE_REQUESTS = 16
 RATE_LIMIT_WINDOW = 60
 RATE_LIMIT_REQUESTS = 30
-FETCH_PORTS = {80, 443}
+BLOCKED_FETCH_PORTS = {
+    19, 21, 22, 23, 25, 53, 110, 111, 135, 137, 138, 139, 143, 161,
+    389, 445, 465, 587, 636, 993, 995, 1433, 1521, 2049, 2375,
+    2376, 3306, 3389, 5432, 5900, 5985, 5986, 6379, 9200, 9300,
+    11211, 27017,
+}
 BLOCKED_CERT_PORTS = {
     0, 19, 25, 53, 110, 135, 137, 138, 139, 143, 161, 389, 445,
     465, 587, 636, 993, 995, 1433, 1521, 2375, 2376, 3306, 3389,
@@ -323,8 +328,8 @@ def normalize_host(host):
 def validate_port(port, purpose):
     if port < 1 or port > 65535:
         raise SecurityError("invalid port")
-    if purpose == "fetch" and port not in FETCH_PORTS:
-        raise SecurityError("subscription URL port is not allowed")
+    if purpose == "fetch" and port in BLOCKED_FETCH_PORTS:
+        raise SecurityError("subscription URL port is blocked")
     if purpose == "cert" and port in BLOCKED_CERT_PORTS:
         raise SecurityError("certificate probe port is not allowed")
 
@@ -655,6 +660,18 @@ def cert_target(info):
     return method, info["host"], info["port"], sni
 
 
+def param_enabled(params, key):
+    if key not in params:
+        return False
+    value = str(params.get(key, "")).strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def needs_cert_pin(info):
+    params = info.get("params", {})
+    return param_enabled(params, "insecure") or param_enabled(params, "allowInsecure")
+
+
 def convert_link(info, sha256=MISSING):
     if sha256 is MISSING:
         sha256 = get_cert_sha256(*cert_target(info))
@@ -702,7 +719,7 @@ def convert_subscription(text):
     for line in lines:
         info = parse_link(line)
         parsed.append((line, info))
-        if info:
+        if info and needs_cert_pin(info):
             targets.setdefault(cert_target(info), None)
             if len(targets) > MAX_CERT_TARGETS:
                 raise FetchError("subscription has too many certificate targets")
@@ -720,7 +737,7 @@ def convert_subscription(text):
 
     results = []
     for line, info in parsed:
-        if info:
+        if info and needs_cert_pin(info):
             try:
                 results.append(convert_link(info, targets.get(cert_target(info))))
             except Exception:
