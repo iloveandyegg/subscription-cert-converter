@@ -77,6 +77,25 @@ This public version does not write request logs and the web page does not use br
 
 公开版本不会写请求日志，网页也不会使用浏览器本地存储。
 
+## Troubleshooting / 转换失败排查
+
+When some nodes fail to get a certificate pin, common causes include:
+
+当部分节点未能获取证书指纹时，常见原因包括：
+
+- **DNS geo-routing**: Subscriptions behind Alibaba Cloud GTM or similar services resolve to different IPs depending on the resolver location. The converter and your client end up connecting to different backend servers with different TLS certificates, so the pinned fingerprint doesn't match what the client sees.
+- **DNS 地域调度**：使用阿里云 GTM 等服务的订阅会根据解析器所在位置返回不同的 IP。转换器和客户端连接的可能是不同的后端服务器，持有不同的 TLS 证书，导致固定的指纹与客户端实际看到的不一致。
+- **Network reachability**: Some node IPs or ports are reachable from one network but blocked from another (e.g. China Mobile IPs not routable from overseas servers).
+- **网络可达性**：部分节点的 IP 或端口在某些网络可达但在另一些网络被阻断（如海外服务器无法访问中国移动 IP）。
+- **QUIC unavailable**: Hysteria2 nodes require QUIC connectivity for certificate probing. If the deployment host cannot reach the target over UDP/443, the pin cannot be obtained.
+- **QUIC 不可达**：Hysteria2 节点需要 QUIC 连通才能探测证书。如果部署主机无法通过 UDP/443 访问目标，则无法获取指纹。
+- **Port timeout / connection refused**: The target node may be temporarily down or the port may be firewalled.
+- **端口超时 / 连接被拒**：目标节点可能临时下线或端口被防火墙拦截。
+
+If you see these issues, **running the converter locally is recommended**. A local instance shares the same DNS resolver and network path as your client, which resolves geo-routing mismatches and reachability problems.
+
+如果遇到上述问题，**建议在本地部署转换器**。本地实例与客户端使用相同的 DNS 解析器和网络路径，可以解决地域调度和可达性问题。
+
 ## Local Deployment / 本地部署
 
 If your subscription uses DNS-based geo-routing (e.g. Alibaba Cloud GTM), running the converter locally ensures DNS resolution matches your client.
