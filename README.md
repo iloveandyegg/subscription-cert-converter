@@ -77,6 +77,39 @@ This public version does not write request logs and the web page does not use br
 
 公开版本不会写请求日志，网页也不会使用浏览器本地存储。
 
+## Local Deployment / 本地部署
+
+If your subscription uses DNS-based geo-routing (e.g. Alibaba Cloud GTM), running the converter locally ensures DNS resolution matches your client.
+
+如果你的订阅使用了基于地理的 DNS 调度（如阿里云 GTM），本地部署可以确保 DNS 解析结果与客户端一致。
+
+```bash
+git clone https://github.com/iloveandyegg/subscription-cert-converter.git
+cd subscription-cert-converter
+pip install -r requirements.txt
+CONVERTER_SSL=0 python3 converter.py
+```
+
+This starts a plain HTTP server on port 8080 by default. Use it as:
+
+服务默认在 8080 端口以 HTTP 模式启动。使用方式：
+
+```text
+http://localhost:8080/?url=<url-encoded-subscription-url>
+```
+
+Environment variables:
+
+环境变量：
+
+| Variable | Default | Description |
+|---|---|---|
+| `CONVERTER_SSL` | `1` | Set to `0` to disable TLS (plain HTTP) |
+| `CONVERTER_HOST` | `0.0.0.0` | Listen address |
+| `CONVERTER_PORT` | `8443` / `8080` | Port (8443 with SSL, 8080 without) |
+| `CONVERTER_CERT` | `fullchain.pem` | TLS certificate path (when SSL enabled) |
+| `CONVERTER_KEY` | `privkey.pem` | TLS private key path (when SSL enabled) |
+
 ## Install / 安装
 
 Install Python dependencies in a virtual environment.

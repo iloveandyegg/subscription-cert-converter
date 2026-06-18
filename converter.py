@@ -350,13 +350,12 @@ def resolve_public_addresses(host, port, socket_type, purpose):
         sockaddr = (str(literal), port, 0, 0) if family == socket.AF_INET6 else (str(literal), port)
         return [(family, sockaddr, str(literal))]
 
+    addresses = []
+    seen = set()
     try:
         infos = socket.getaddrinfo(host, port, type=socket_type)
     except socket.gaierror as e:
         raise SecurityError(f"DNS resolution failed: {e}") from e
-
-    addresses = []
-    seen = set()
     for family, socktype, _proto, _canonname, sockaddr in infos:
         if socktype != socket_type:
             continue
@@ -372,6 +371,44 @@ def resolve_public_addresses(host, port, socket_type, purpose):
     if not addresses:
         raise SecurityError("no usable public address")
     return addresses
+
+
+def resolve_direct_dns(host):
+    try:
+        import dns.resolver
+    except ImportError:
+        return []
+    host = normalize_host(host)
+    ips = []
+    seen = set()
+    for dns_server in ("114.114.114.114", "223.5.5.5"):
+        resolver = dns.resolver.Resolver()
+        resolver.nameservers = [dns_server]
+        resolver.lifetime = 5
+        target = host
+        for _ in range(10):
+            try:
+                answers = resolver.resolve(target, "CNAME")
+                target = str(answers[0].target).rstrip(".")
+            except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+                break
+            except Exception:
+                target = host
+                break
+        for rdtype in ("A", "AAAA"):
+            try:
+                answers = resolver.resolve(target, rdtype)
+                for rdata in answers:
+                    ip = str(rdata)
+                    if ip in seen:
+                        continue
+                    if not is_public_ip(ip):
+                        continue
+                    seen.add(ip)
+                    ips.append(ip)
+            except Exception:
+                continue
+    return ips
 
 
 def create_public_tcp_connection(host, port, timeout, purpose):
@@ -507,14 +544,15 @@ def get_cert_sha256(method, host, port, sni):
             return cached[1]
 
     sha256 = None
-    for attempt in range(2):
+    for attempt in range(3):
         if method == "quic":
             sha256 = get_quic_cert_sha256(host, port, sni)
         else:
             sha256 = get_tcp_cert_sha256(host, port, sni)
-        if sha256 or attempt == 1:
+        if sha256:
             break
-        time.sleep(0.2)
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
 
     with CACHE_LOCK:
         CERT_CACHE[cache_key] = (time.monotonic(), sha256)
@@ -538,7 +576,7 @@ def get_tcp_cert_sha256(host, port, sni):
         pass
     sha256 = None
     try:
-        with create_public_tcp_connection(host, port, 5, "cert") as sock:
+        with create_public_tcp_connection(host, port, 10, "cert") as sock:
             with ctx.wrap_socket(sock, server_hostname=sni) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)
                 sha256 = hashlib.sha256(cert_der).hexdigest()
@@ -547,12 +585,46 @@ def get_tcp_cert_sha256(host, port, sni):
         ctx2.check_hostname = False
         ctx2.verify_mode = ssl.CERT_NONE
         try:
-            with create_public_tcp_connection(host, port, 5, "cert") as sock:
+            with create_public_tcp_connection(host, port, 10, "cert") as sock:
                 with ctx2.wrap_socket(sock, server_hostname=sni) as ssock:
                     cert_der = ssock.getpeercert(binary_form=True)
                     sha256 = hashlib.sha256(cert_der).hexdigest()
         except Exception:
             pass
+    if not sha256:
+        for ip in resolve_direct_dns(host):
+            try:
+                family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+                sockaddr = (ip, port, 0, 0) if family == socket.AF_INET6 else (ip, port)
+                sock = socket.socket(family, socket.SOCK_STREAM)
+                sock.settimeout(10)
+                sock.connect(sockaddr)
+                try:
+                    with ctx.wrap_socket(sock, server_hostname=sni) as ssock:
+                        cert_der = ssock.getpeercert(binary_form=True)
+                        sha256 = hashlib.sha256(cert_der).hexdigest()
+                except Exception:
+                    ctx3 = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    ctx3.check_hostname = False
+                    ctx3.verify_mode = ssl.CERT_NONE
+                    sock2 = socket.socket(family, socket.SOCK_STREAM)
+                    sock2.settimeout(10)
+                    sock2.connect(sockaddr)
+                    try:
+                        with ctx3.wrap_socket(sock2, server_hostname=sni) as ssock:
+                            cert_der = ssock.getpeercert(binary_form=True)
+                            sha256 = hashlib.sha256(cert_der).hexdigest()
+                    except Exception:
+                        continue
+                    finally:
+                        try:
+                            sock2.close()
+                        except Exception:
+                            pass
+                if sha256:
+                    break
+            except Exception:
+                continue
     return sha256
 
 
@@ -725,9 +797,23 @@ def convert_subscription(text):
                 raise FetchError("subscription has too many certificate targets")
 
     if targets:
+        host_semaphores = {}
+        for target in targets:
+            host = target[1]
+            if host not in host_semaphores:
+                host_semaphores[host] = threading.Semaphore(6)
+
+        def fetch_with_limit(t):
+            sem = host_semaphores[t[1]]
+            sem.acquire()
+            try:
+                return get_cert_sha256(*t)
+            finally:
+                sem.release()
+
         workers = min(32, len(targets))
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(get_cert_sha256, *target): target for target in targets}
+            futures = {executor.submit(fetch_with_limit, target): target for target in targets}
             for future in as_completed(futures):
                 target = futures[future]
                 try:
@@ -814,14 +900,20 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    cert = os.environ.get("CONVERTER_CERT", "fullchain.pem")
-    key = os.environ.get("CONVERTER_KEY", "privkey.pem")
+    use_ssl = os.environ.get("CONVERTER_SSL", "1") != "0"
     host = os.environ.get("CONVERTER_HOST", "0.0.0.0")
-    port = int(os.environ.get("CONVERTER_PORT", "8443"))
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ctx.load_cert_chain(cert, key)
-    server = TLSHTTPServer((host, port), Handler, ctx)
-    print(f"Listening on https://{host}:{port}")
+    default_port = "8443" if use_ssl else "8080"
+    port = int(os.environ.get("CONVERTER_PORT", default_port))
+    if use_ssl:
+        cert = os.environ.get("CONVERTER_CERT", "fullchain.pem")
+        key = os.environ.get("CONVERTER_KEY", "privkey.pem")
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(cert, key)
+        server = TLSHTTPServer((host, port), Handler, ctx)
+        print(f"Listening on https://{host}:{port}")
+    else:
+        server = ThreadingHTTPServer((host, port), Handler)
+        print(f"Listening on http://{host}:{port}")
     server.serve_forever()
 
 
